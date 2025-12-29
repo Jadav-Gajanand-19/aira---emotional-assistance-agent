@@ -46,6 +46,11 @@ dependencies:
   
   # UUID generation for sessions
   uuid: ^4.3.0
+  
+  # Voice interaction
+  speech_to_text: ^7.0.0
+  flutter_tts: ^4.2.0
+  permission_handler: ^11.3.0
 
 dev_dependencies:
   flutter_test:

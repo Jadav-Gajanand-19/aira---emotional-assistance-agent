@@ -3,15 +3,16 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../theme/aira_theme.dart';
 import '../services/chat_service.dart';
+import '../services/voice_service.dart';
 import '../widgets/message_bubble.dart';
+import 'voice_settings_screen.dart';
 
 /// Aira Chat Screen
 /// 
 /// A calm, supportive chat interface with:
-/// - Soft background
-/// - Rounded message bubbles
-/// - Gentle typing indicator
-/// - Slow fade-in animations
+/// - Voice input (microphone)
+/// - Voice output (speaker)
+/// - Soft background and animations
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
 
@@ -21,6 +22,7 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> {
   final ChatService _chatService = ChatService();
+  final VoiceService _voiceService = VoiceService();
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final FocusNode _focusNode = FocusNode();
@@ -28,12 +30,18 @@ class _ChatScreenState extends State<ChatScreen> {
   final List<Message> _messages = [];
   bool _isLoading = false;
   bool _isConnected = true;
+  bool _isListening = false;
+  bool _isSpeaking = false;
+  bool _voiceEnabled = false;
+  bool _autoSpeak = true; // Auto-speak Aira's responses
+  AiraLanguage _currentLanguage = AiraLanguage.english;
   
   @override
   void initState() {
     super.initState();
     _checkConnection();
     _addWelcomeMessage();
+    _initVoice();
   }
   
   @override
@@ -42,7 +50,49 @@ class _ChatScreenState extends State<ChatScreen> {
     _scrollController.dispose();
     _focusNode.dispose();
     _chatService.dispose();
+    _voiceService.dispose();
     super.dispose();
+  }
+  
+  /// Initialize voice services
+  Future<void> _initVoice() async {
+    _voiceService.onResult = (text) {
+      setState(() {
+        _textController.text = text;
+      });
+      // Auto-send after voice input
+      _sendMessage();
+    };
+    
+    _voiceService.onListeningChanged = (isListening) {
+      if (mounted) {
+        setState(() => _isListening = isListening);
+      }
+    };
+    
+    _voiceService.onSpeakingChanged = (isSpeaking) {
+      if (mounted) {
+        setState(() => _isSpeaking = isSpeaking);
+      }
+    };
+    
+    _voiceService.onError = (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(error, style: GoogleFonts.nunito()),
+            backgroundColor: Colors.red.shade400,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        );
+      }
+    };
+    
+    final enabled = await _voiceService.initialize();
+    if (mounted) {
+      setState(() => _voiceEnabled = enabled);
+    }
   }
   
   /// Check API connection on startup
@@ -67,6 +117,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (text.isEmpty || _isLoading) return;
     
     _textController.clear();
+    _focusNode.unfocus();
     
     setState(() {
       _messages.add(Message(text: text, isUser: true));
@@ -76,7 +127,10 @@ class _ChatScreenState extends State<ChatScreen> {
     _scrollToBottom();
     
     try {
-      final response = await _chatService.sendMessage(text);
+      final response = await _chatService.sendMessage(
+        text,
+        language: _currentLanguage.code,
+      );
       
       if (mounted) {
         setState(() {
@@ -88,6 +142,11 @@ class _ChatScreenState extends State<ChatScreen> {
           _isLoading = false;
         });
         _scrollToBottom();
+        
+        // Auto-speak Aira's response
+        if (_autoSpeak && _voiceEnabled) {
+          await _voiceService.speak(response.message);
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -100,6 +159,26 @@ class _ChatScreenState extends State<ChatScreen> {
         });
         _scrollToBottom();
       }
+    }
+  }
+  
+  /// Toggle voice input
+  Future<void> _toggleVoiceInput() async {
+    if (_isListening) {
+      await _voiceService.stopListening();
+    } else {
+      await _voiceService.startListening();
+    }
+  }
+  
+  /// Speak the last message
+  Future<void> _speakLastMessage() async {
+    if (_messages.isNotEmpty) {
+      final lastAiraMessage = _messages.lastWhere(
+        (m) => !m.isUser,
+        orElse: () => _messages.last,
+      );
+      await _voiceService.speak(lastAiraMessage.text);
     }
   }
   
@@ -153,9 +232,93 @@ class _ChatScreenState extends State<ChatScreen> {
                 color: AiraTheme.textPrimary,
               ),
             ),
+            if (_isSpeaking) ...[
+              const SizedBox(width: 8),
+              Icon(
+                Icons.volume_up,
+                size: 16,
+                color: AiraTheme.primary,
+              )
+              .animate(onComplete: (c) => c.repeat())
+              .fadeIn()
+              .then()
+              .fadeOut(),
+            ],
           ],
         ),
         centerTitle: true,
+        actions: [
+          // Language selector
+          PopupMenuButton<AiraLanguage>(
+            icon: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.language,
+                  size: 18,
+                  color: AiraTheme.primary,
+                ),
+                const SizedBox(width: 2),
+                Text(
+                  _currentLanguage.code.toUpperCase(),
+                  style: GoogleFonts.nunito(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: AiraTheme.primary,
+                  ),
+                ),
+              ],
+            ),
+            tooltip: 'Change language',
+            onSelected: (language) {
+              setState(() => _currentLanguage = language);
+              _voiceService.setLanguage(language);
+            },
+            itemBuilder: (context) => AiraLanguage.all.map((lang) => 
+              PopupMenuItem<AiraLanguage>(
+                value: lang,
+                child: Row(
+                  children: [
+                    if (lang == _currentLanguage)
+                      Icon(Icons.check, size: 16, color: AiraTheme.primary)
+                    else
+                      const SizedBox(width: 16),
+                    const SizedBox(width: 8),
+                    Text(lang.name, style: GoogleFonts.nunito()),
+                  ],
+                ),
+              ),
+            ).toList(),
+          ),
+          // Toggle auto-speak
+          IconButton(
+            icon: Icon(
+              _autoSpeak ? Icons.volume_up : Icons.volume_off,
+              size: 20,
+              color: _autoSpeak ? AiraTheme.primary : AiraTheme.textSecondary,
+            ),
+            onPressed: () => setState(() => _autoSpeak = !_autoSpeak),
+            tooltip: _autoSpeak ? 'Voice on' : 'Voice off',
+          ),
+          // Voice settings
+          IconButton(
+            icon: Icon(
+              Icons.settings,
+              size: 20,
+              color: AiraTheme.textSecondary,
+            ),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => VoiceSettingsScreen(
+                    voiceService: _voiceService,
+                  ),
+                ),
+              );
+            },
+            tooltip: 'Voice settings',
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -193,9 +356,14 @@ class _ChatScreenState extends State<ChatScreen> {
                 }
                 
                 final message = _messages[index];
-                return MessageBubble(
-                  message: message,
-                  showTimestamp: false,
+                return GestureDetector(
+                  onLongPress: !message.isUser && _voiceEnabled
+                      ? () => _voiceService.speak(message.text)
+                      : null,
+                  child: MessageBubble(
+                    message: message,
+                    showTimestamp: false,
+                  ),
                 )
                 .animate()
                 .fadeIn(duration: 400.ms)
@@ -203,6 +371,35 @@ class _ChatScreenState extends State<ChatScreen> {
               },
             ),
           ),
+          
+          // Listening indicator
+          if (_isListening)
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.mic,
+                    color: AiraTheme.primary,
+                    size: 20,
+                  )
+                  .animate(onComplete: (c) => c.repeat(reverse: true))
+                  .scale(begin: const Offset(1, 1), end: const Offset(1.2, 1.2)),
+                  const SizedBox(width: 8),
+                  Text(
+                    "Listening...",
+                    style: GoogleFonts.nunito(
+                      fontSize: 14,
+                      color: AiraTheme.primary,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            )
+            .animate()
+            .fadeIn(),
           
           // Input area
           _buildInputArea(),
@@ -269,7 +466,7 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
   
-  /// Build the input area
+  /// Build the input area with voice button
   Widget _buildInputArea() {
     return Container(
       padding: EdgeInsets.fromLTRB(
@@ -290,6 +487,28 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       child: Row(
         children: [
+          // Microphone button
+          if (_voiceEnabled)
+            Container(
+              margin: const EdgeInsets.only(right: 8),
+              decoration: BoxDecoration(
+                color: _isListening ? AiraTheme.primary : Colors.white,
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: _isListening ? AiraTheme.primary : AiraTheme.textSecondary.withOpacity(0.2),
+                ),
+              ),
+              child: IconButton(
+                icon: Icon(
+                  _isListening ? Icons.mic : Icons.mic_none,
+                  color: _isListening ? Colors.white : AiraTheme.textSecondary,
+                  size: 22,
+                ),
+                onPressed: _toggleVoiceInput,
+              ),
+            ),
+          
+          // Text input
           Expanded(
             child: TextField(
               controller: _textController,
@@ -302,7 +521,9 @@ class _ChatScreenState extends State<ChatScreen> {
                 color: AiraTheme.textPrimary,
               ),
               decoration: InputDecoration(
-                hintText: "Share what's on your mind...",
+                hintText: _voiceEnabled 
+                    ? "Type or tap mic to speak..." 
+                    : "Share what's on your mind...",
                 hintStyle: GoogleFonts.nunito(
                   fontSize: 15,
                   color: AiraTheme.textSecondary.withOpacity(0.6),
@@ -322,6 +543,8 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ),
           const SizedBox(width: 12),
+          
+          // Send button
           Container(
             decoration: BoxDecoration(
               color: AiraTheme.primary,

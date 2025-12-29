@@ -13,7 +13,7 @@ class ChatService {
   /// Base URL for the Aira API
   /// ⚠️ Replace with your Railway URL after deployment
   /// Example: 'https://aira-backend-production.up.railway.app'
-  static const String baseUrl = 'https://aira-api.onrender.com'; // Render testing (web/Chrome)
+  static const String baseUrl = 'https://aiera-backend.onrender.com'; // Render deployed
   // static const String baseUrl = 'http://10.0.2.2:8000'; // Android emulator
   // static const String baseUrl = 'https://your-app.up.railway.app'; // Production
   
@@ -41,10 +41,11 @@ class ChatService {
   /// Send a message to Aira and receive a response
   /// 
   /// [message] - The user's message
+  /// [language] - Optional language code for response (en, hi, te, etc.)
   /// 
   /// Returns a [ChatResponse] containing Aira's reply
   /// Throws an exception if the request fails
-  Future<ChatResponse> sendMessage(String message) async {
+  Future<ChatResponse> sendMessage(String message, {String? language}) async {
     try {
       final response = await _client.post(
         Uri.parse('$baseUrl/chat'),
@@ -53,6 +54,7 @@ class ChatService {
           'message': message,
           'session_id': sessionId,
           'user_id': userId,
+          'language': language ?? 'en',
         }),
       ).timeout(const Duration(seconds: 30));
       

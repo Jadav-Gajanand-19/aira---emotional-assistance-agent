@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../theme/aira_theme.dart';
-import 'auth_screen.dart';
+import 'home_screen.dart';
 
 /// Aira Splash Screen
 /// 
@@ -44,7 +44,7 @@ class _SplashScreenState extends State<SplashScreen>
         Navigator.of(context).pushReplacement(
           PageRouteBuilder(
             pageBuilder: (context, animation, secondaryAnimation) {
-              return const AuthScreen();
+              return const HomeScreen();
             },
             transitionsBuilder: (context, animation, secondaryAnimation, child) {
               return FadeTransition(
